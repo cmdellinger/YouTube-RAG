@@ -1,0 +1,176 @@
+"""Fetch video list and metadata from a YouTube channel using yt-dlp."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import yt_dlp
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VideoMetadata:
+    """Metadata for a single YouTube video."""
+
+    video_id: str
+    title: str
+    description: str
+    upload_date: str  # YYYYMMDD
+    duration: int  # seconds
+    url: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> VideoMetadata:
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+def _get_metadata_path(data_dir: Path, video_id: str) -> Path:
+    """Return the path to a video's metadata JSON file."""
+    metadata_dir = data_dir / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    return metadata_dir / f"{video_id}.json"
+
+
+def _load_existing_ids(data_dir: Path) -> set[str]:
+    """Load the set of video IDs that have already been fetched."""
+    metadata_dir = data_dir / "metadata"
+    if not metadata_dir.exists():
+        return set()
+    return {p.stem for p in metadata_dir.glob("*.json")}
+
+
+def fetch_channel_videos(
+    channel_url: str,
+    data_dir: Path | str = "data",
+    limit: int | None = None,
+    skip_existing: bool = True,
+) -> list[VideoMetadata]:
+    """Fetch video metadata from a YouTube channel.
+
+    Args:
+        channel_url: URL of the YouTube channel.
+        data_dir: Directory to store metadata JSON files.
+        limit: Maximum number of videos to fetch (None = all).
+        skip_existing: If True, skip videos whose metadata is already saved.
+
+    Returns:
+        List of VideoMetadata for newly fetched videos.
+    """
+    data_dir = Path(data_dir)
+    existing_ids = _load_existing_ids(data_dir) if skip_existing else set()
+
+    ydl_opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "force_generic_extractor": False,
+    }
+
+    # Fetch the list of video entries from the channel
+    logger.info("Fetching video list from %s ...", channel_url)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        channel_info = ydl.extract_info(channel_url, download=False)
+
+    if not channel_info:
+        logger.warning("Could not extract channel info from %s", channel_url)
+        return []
+
+    entries = channel_info.get("entries", [])
+    if not entries:
+        logger.warning("No videos found on channel %s", channel_url)
+        return []
+
+    # Flatten nested playlists (channels can have tabs → playlists → entries)
+    flat_entries: list[dict] = []
+    for entry in entries:
+        if entry is None:
+            continue
+        if "entries" in entry:
+            # This is a nested playlist/tab — flatten it
+            for sub in entry.get("entries", []):
+                if sub is not None:
+                    flat_entries.append(sub)
+        else:
+            flat_entries.append(entry)
+
+    logger.info("Found %d videos on channel", len(flat_entries))
+
+    # Filter out already-fetched videos
+    new_entries = [
+        e for e in flat_entries if e.get("id") and e["id"] not in existing_ids
+    ]
+    if skip_existing and len(new_entries) < len(flat_entries):
+        logger.info("Skipping %d already-fetched videos", len(flat_entries) - len(new_entries))
+
+    if limit is not None:
+        new_entries = new_entries[:limit]
+
+    # Fetch full metadata for each new video
+    results: list[VideoMetadata] = []
+    detail_opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+    }
+
+    for i, entry in enumerate(new_entries, 1):
+        video_id = entry.get("id", "")
+        video_url = entry.get("url") or f"https://www.youtube.com/watch?v={video_id}"
+
+        logger.info("[%d/%d] Fetching metadata for: %s", i, len(new_entries), video_id)
+
+        try:
+            with yt_dlp.YoutubeDL(detail_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+
+            if not info:
+                logger.warning("  Could not extract info for %s", video_id)
+                continue
+
+            meta = VideoMetadata(
+                video_id=info.get("id", video_id),
+                title=info.get("title", ""),
+                description=info.get("description", ""),
+                upload_date=info.get("upload_date", ""),
+                duration=info.get("duration", 0) or 0,
+                url=info.get("webpage_url", video_url),
+            )
+
+            # Save metadata to disk
+            meta_path = _get_metadata_path(data_dir, meta.video_id)
+            meta_path.write_text(json.dumps(meta.to_dict(), indent=2))
+
+            results.append(meta)
+            logger.info("  Saved: %s", meta.title)
+
+        except Exception as exc:
+            logger.warning("  Error fetching %s: %s", video_id, exc)
+            continue
+
+    logger.info("Fetched metadata for %d new videos", len(results))
+    return results
+
+
+def load_all_metadata(data_dir: Path | str = "data") -> list[VideoMetadata]:
+    """Load all previously-saved video metadata from disk."""
+    data_dir = Path(data_dir)
+    metadata_dir = data_dir / "metadata"
+    if not metadata_dir.exists():
+        return []
+
+    results: list[VideoMetadata] = []
+    for path in sorted(metadata_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+            results.append(VideoMetadata.from_dict(data))
+        except Exception as exc:
+            logger.warning("Error loading %s: %s", path, exc)
+
+    return results

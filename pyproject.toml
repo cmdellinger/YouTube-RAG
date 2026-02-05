@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codetrading-rag"
+version = "0.1.0"
+description = "RAG system for CodeTradingCafe YouTube channel - generates trading strategies from video transcripts and code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+    "langchain-community>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-openai>=0.3",
+    "langchain-chroma>=0.2",
+    "langchain-huggingface>=0.1",
+    "langchain-text-splitters>=0.3",
+    "chromadb>=0.5",
+    "youtube-transcript-api>=1.0",
+    "yt-dlp>=2024.0",
+    "python-dotenv>=1.0",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+codetrading-rag = "codetrading_rag.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
