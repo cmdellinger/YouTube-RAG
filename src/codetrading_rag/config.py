@@ -47,6 +47,12 @@ class Config:
 
     # YouTube
     channel_url: str = "https://www.youtube.com/@CodeTradingCafe"
+    
+    # Transcript fetching
+    transcript_max_retries: int = 3
+    transcript_retry_delay: float = 2.0
+    transcript_enable_fallbacks: bool = True
+    cookies_from_browser: str = ""  # e.g. "chrome", "firefox", "brave" — yt-dlp reads cookies directly
 
     # Retriever
     retriever_k: int = 5
@@ -68,6 +74,10 @@ class Config:
             ),
             chroma_db_path=os.getenv("CHROMA_DB_PATH", "./data/chroma_db"),
             channel_url=os.getenv("CHANNEL_URL", "https://www.youtube.com/@CodeTradingCafe"),
+            transcript_max_retries=int(os.getenv("TRANSCRIPT_MAX_RETRIES", "3")),
+            transcript_retry_delay=float(os.getenv("TRANSCRIPT_RETRY_DELAY", "1.0")),
+            transcript_enable_fallbacks=os.getenv("TRANSCRIPT_ENABLE_FALLBACKS", "true").lower() == "true",
+            cookies_from_browser=os.getenv("COOKIES_FROM_BROWSER", ""),
             retriever_k=int(os.getenv("RETRIEVER_K", "5")),
         )
 

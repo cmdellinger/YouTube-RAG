@@ -47,7 +47,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
     "--limit",
     type=int,
     default=None,
-    help="Maximum number of videos to fetch (default: all).",
+    help="Maximum number of videos to process (default: all).",
 )
 @click.option(
     "--data-dir",
@@ -65,7 +65,7 @@ def ingest(ctx: click.Context, limit: int | None, data_dir: str) -> None:
     from codetrading_rag.embeddings.factory import get_embeddings
     from codetrading_rag.ingest.channel import fetch_channel_videos, load_all_metadata
     from codetrading_rag.ingest.processor import process_video
-    from codetrading_rag.ingest.transcripts import fetch_transcript
+    from codetrading_rag.ingest.transcripts import IpBlockedError, fetch_transcript
     from codetrading_rag.vectorstore.store import VectorStore
 
     # Step 1: Fetch video metadata
@@ -78,32 +78,48 @@ def ingest(ctx: click.Context, limit: int | None, data_dir: str) -> None:
     all_videos = load_all_metadata(data_path)
     console.print(f"  Videos: [green]{len(new_videos)} new[/], {len(all_videos)} total\n")
 
+    # Apply --limit to the total number of videos to process
+    videos_to_process = all_videos[:limit] if limit else all_videos
+
     # Step 2: Fetch transcripts
-    console.print("[bold blue]Step 2:[/] Fetching transcripts...\n")
+    console.print(f"[bold blue]Step 2:[/] Fetching transcripts for {len(videos_to_process)} videos...\n")
     transcripts = {}
     failed = 0
-    for i, video in enumerate(all_videos, 1):
+    ip_blocked = False
+    for i, video in enumerate(videos_to_process, 1):
         console.print(
-            f"  [{i}/{len(all_videos)}] {video.title[:60]}...",
+            f"  [{i}/{len(videos_to_process)}] {video.title[:60]}...",
             end="",
         )
-        transcript = fetch_transcript(video.video_id, data_dir=data_path)
-        if transcript:
-            transcripts[video.video_id] = transcript
-            console.print(f" [green]{len(transcript.segments)} segments[/]")
-        else:
+        try:
+            transcript = fetch_transcript(video.video_id, data_dir=data_path, config=config)
+            if transcript:
+                transcripts[video.video_id] = transcript
+                console.print(f" [green]{len(transcript.segments)} segments[/]")
+            else:
+                failed += 1
+                console.print(" [yellow]no transcript[/]")
+        except IpBlockedError:
             failed += 1
-            console.print(" [yellow]no transcript[/]")
+            ip_blocked = True
+            console.print(" [bold red]IP BLOCKED[/]")
+            console.print(
+                "\n  [bold red]YouTube is blocking your IP.[/] "
+                "Stopping transcript fetching to avoid making it worse.\n"
+                "  Already-fetched transcripts will still be processed.\n"
+                "  Wait 30-60 minutes, then run [cyan]codetrading-rag ingest[/] again.\n"
+            )
+            break
 
     console.print(
         f"\n  Transcripts: [green]{len(transcripts)} fetched[/], "
         f"[yellow]{failed} unavailable[/]\n"
     )
 
-    # Step 3: Process into documents
+    # Step 3: Process into documents (use ALL videos that have transcripts/metadata)
     console.print("[bold blue]Step 3:[/] Processing documents...\n")
     all_documents = []
-    for video in all_videos:
+    for video in videos_to_process:
         transcript = transcripts.get(video.video_id)
         docs = process_video(video, transcript)
         all_documents.extend(docs)
@@ -124,7 +140,13 @@ def ingest(ctx: click.Context, limit: int | None, data_dir: str) -> None:
         f"at {config.chroma_db_path}\n"
     )
 
-    console.print("[bold green]Ingestion complete![/]\n")
+    if ip_blocked:
+        console.print(
+            "[bold yellow]Partial ingestion complete.[/] "
+            "Run [cyan]codetrading-rag ingest[/] again later to fetch remaining transcripts.\n"
+        )
+    else:
+        console.print("[bold green]Ingestion complete![/]\n")
 
 
 # ─── query ───────────────────────────────────────────────────────────────────
