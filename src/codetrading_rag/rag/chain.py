@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 
 from codetrading_rag.config import Config
 from codetrading_rag.embeddings.factory import get_embeddings
@@ -38,7 +37,7 @@ class RAGResponse:
 
 
 class RAGChain:
-    """End-to-end RAG pipeline: retrieve context → generate response."""
+    """End-to-end RAG pipeline: retrieve context -> generate response."""
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -60,12 +59,18 @@ class RAGChain:
         """Access the underlying vector store."""
         return self._vector_store
 
-    def query(self, question: str, mode: str = "strategy") -> RAGResponse:
+    def query(
+        self,
+        question: str,
+        mode: str = "strategy",
+        channel_ids: list[str] | None = None,
+    ) -> RAGResponse:
         """Run a RAG query.
 
         Args:
             question: User's question or request.
             mode: Prompt mode - "strategy", "explain", or "review".
+            channel_ids: Optional list of channel slugs to filter retrieval.
 
         Returns:
             RAGResponse with the answer and source documents.
@@ -81,13 +86,13 @@ class RAGChain:
             )
 
         prompt = get_prompt(mode)
-        retriever = self._vector_store.as_retriever()
+        retriever = self._vector_store.as_retriever(channel_ids=channel_ids)
 
         # Retrieve documents first so we can return them alongside the answer
         logger.info("Running RAG query (mode=%s): %s", mode, question[:80])
         retrieved_docs = retriever.invoke(question)
 
-        # Build LCEL chain: format context → prompt → LLM → parse output
+        # Build LCEL chain: format context -> prompt -> LLM -> parse output
         chain = prompt | self._llm | StrOutputParser()
 
         answer = chain.invoke({

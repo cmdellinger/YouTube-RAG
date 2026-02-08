@@ -6,7 +6,7 @@ Loads settings from .env file with sensible defaults.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,9 +45,9 @@ class Config:
     # Vector store
     chroma_db_path: str = "./data/chroma_db"
 
-    # YouTube
-    channel_url: str = "https://www.youtube.com/@CodeTradingCafe"
-    
+    # Data directory
+    data_dir: str = "./data"
+
     # Transcript fetching
     transcript_max_retries: int = 3
     transcript_retry_delay: float = 2.0
@@ -56,6 +56,10 @@ class Config:
 
     # Retriever
     retriever_k: int = 5
+
+    # GUI
+    gui_port: int = 7860
+    gui_share: bool = False
 
     @classmethod
     def from_env(cls) -> Config:
@@ -73,12 +77,14 @@ class Config:
                 "HF_EMBEDDING_MODEL", "sentence-transformers/all-mpnet-base-v2"
             ),
             chroma_db_path=os.getenv("CHROMA_DB_PATH", "./data/chroma_db"),
-            channel_url=os.getenv("CHANNEL_URL", "https://www.youtube.com/@CodeTradingCafe"),
+            data_dir=os.getenv("DATA_DIR", "./data"),
             transcript_max_retries=int(os.getenv("TRANSCRIPT_MAX_RETRIES", "3")),
             transcript_retry_delay=float(os.getenv("TRANSCRIPT_RETRY_DELAY", "1.0")),
             transcript_enable_fallbacks=os.getenv("TRANSCRIPT_ENABLE_FALLBACKS", "true").lower() == "true",
             cookies_from_browser=os.getenv("COOKIES_FROM_BROWSER", ""),
             retriever_k=int(os.getenv("RETRIEVER_K", "5")),
+            gui_port=int(os.getenv("GUI_PORT", "7860")),
+            gui_share=os.getenv("GUI_SHARE", "false").lower() == "true",
         )
 
     def validate(self) -> list[str]:

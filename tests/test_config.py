@@ -15,7 +15,9 @@ class TestConfig:
         assert config.llm_backend == "claude"
         assert config.embedding_backend == "huggingface"
         assert config.retriever_k == 5
-        assert config.channel_url == "https://www.youtube.com/@CodeTradingCafe"
+        assert config.data_dir == "./data"
+        assert config.gui_port == 7860
+        assert config.gui_share is False
 
     def test_from_env(self):
         """Config.from_env should read from environment variables."""
@@ -25,6 +27,8 @@ class TestConfig:
             "EMBEDDING_BACKEND": "openai",
             "OPENAI_API_KEY": "sk-test-123",
             "RETRIEVER_K": "10",
+            "DATA_DIR": "/tmp/data",
+            "GUI_PORT": "8080",
         }
         with patch.dict(os.environ, env, clear=False):
             config = Config.from_env()
@@ -34,6 +38,8 @@ class TestConfig:
         assert config.embedding_backend == "openai"
         assert config.openai_api_key == "sk-test-123"
         assert config.retriever_k == 10
+        assert config.data_dir == "/tmp/data"
+        assert config.gui_port == 8080
 
     def test_validate_claude_no_key(self):
         """Validation should flag missing Anthropic key for Claude backend."""

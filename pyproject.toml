@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codetrading-rag"
 version = "0.1.0"
-description = "RAG system for CodeTradingCafe YouTube channel - generates trading strategies from video transcripts and code"
+description = "Multi-channel YouTube RAG system for trading strategies - generates strategies from video transcripts and code"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -29,6 +29,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+    "gradio>=4.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

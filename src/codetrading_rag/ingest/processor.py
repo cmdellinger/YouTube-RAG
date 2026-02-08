@@ -29,18 +29,27 @@ CODE_SPLITTER = RecursiveCharacterTextSplitter(
 )
 
 
-def _base_metadata(meta: VideoMetadata) -> dict:
+def _base_metadata(
+    meta: VideoMetadata,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> dict:
     """Return shared metadata fields for all chunks from a video."""
     return {
         "video_id": meta.video_id,
         "video_title": meta.title,
         "video_url": meta.url,
         "upload_date": meta.upload_date,
+        "channel_id": channel_id,
+        "channel_name": channel_name,
     }
 
 
 def _process_transcript(
-    meta: VideoMetadata, transcript: FetchedTranscript
+    meta: VideoMetadata,
+    transcript: FetchedTranscript,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> list[Document]:
     """Split transcript into chunked Documents with timing metadata."""
     if not transcript.segments:
@@ -54,8 +63,6 @@ def _process_transcript(
     documents: list[Document] = []
 
     # Map chunks back to approximate timestamps
-    char_offset = 0
-    seg_idx = 0
     seg_char_positions: list[tuple[float, float, int]] = []  # (start, end_time, char_end)
 
     running_pos = 0
@@ -65,7 +72,7 @@ def _process_transcript(
         running_pos = seg_end
 
     for chunk in chunks:
-        base = _base_metadata(meta)
+        base = _base_metadata(meta, channel_id, channel_name)
         base["chunk_type"] = "transcript"
 
         # Find approximate start/end times for this chunk
@@ -90,13 +97,17 @@ def _process_transcript(
     return documents
 
 
-def _process_description(meta: VideoMetadata) -> list[Document]:
+def _process_description(
+    meta: VideoMetadata,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> list[Document]:
     """Create a Document from the video description (if substantial)."""
     desc = meta.description.strip()
     if len(desc) < 50:
         return []
 
-    base = _base_metadata(meta)
+    base = _base_metadata(meta, channel_id, channel_name)
     base["chunk_type"] = "description"
     base["start_time"] = None
     base["end_time"] = None
@@ -105,13 +116,16 @@ def _process_description(meta: VideoMetadata) -> list[Document]:
 
 
 def _process_code_blocks(
-    meta: VideoMetadata, code_blocks: list[CodeBlock]
+    meta: VideoMetadata,
+    code_blocks: list[CodeBlock],
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> list[Document]:
     """Split code blocks into chunked Documents."""
     documents: list[Document] = []
 
     for block in code_blocks:
-        base = _base_metadata(meta)
+        base = _base_metadata(meta, channel_id, channel_name)
         base["chunk_type"] = "code"
         base["code_language"] = block.language
         base["start_time"] = None
@@ -132,6 +146,8 @@ def _process_code_blocks(
 def process_video(
     meta: VideoMetadata,
     transcript: FetchedTranscript | None,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> list[Document]:
     """Process a single video into a list of LangChain Documents.
 
@@ -143,6 +159,8 @@ def process_video(
     Args:
         meta: Video metadata.
         transcript: Fetched transcript (can be None if unavailable).
+        channel_id: Channel slug for metadata tagging.
+        channel_name: Channel display name for metadata tagging.
 
     Returns:
         List of LangChain Document objects ready for embedding.
@@ -151,18 +169,18 @@ def process_video(
 
     # Process transcript
     if transcript:
-        transcript_docs = _process_transcript(meta, transcript)
+        transcript_docs = _process_transcript(meta, transcript, channel_id, channel_name)
         documents.extend(transcript_docs)
         logger.info("  %d transcript chunks from '%s'", len(transcript_docs), meta.title)
 
     # Process description
-    desc_docs = _process_description(meta)
+    desc_docs = _process_description(meta, channel_id, channel_name)
     documents.extend(desc_docs)
 
     # Process code blocks from description
     code_blocks = extract_code_from_description(meta.description)
     if code_blocks:
-        code_docs = _process_code_blocks(meta, code_blocks)
+        code_docs = _process_code_blocks(meta, code_blocks, channel_id, channel_name)
         documents.extend(code_docs)
         logger.info("  %d code chunks from '%s'", len(code_docs), meta.title)
 

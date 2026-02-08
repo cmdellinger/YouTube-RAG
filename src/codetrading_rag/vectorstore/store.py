@@ -1,4 +1,4 @@
-"""ChromaDB vector store wrapper with persistence."""
+"""ChromaDB vector store wrapper with persistence and multi-channel support."""
 
 from __future__ import annotations
 
@@ -70,33 +70,97 @@ class VectorStore:
         self._store.add_documents(documents)
         logger.info("Added %d documents to vector store", len(documents))
 
-    def as_retriever(self, k: int | None = None) -> VectorStoreRetriever:
+    def as_retriever(
+        self,
+        k: int | None = None,
+        channel_ids: list[str] | None = None,
+    ) -> VectorStoreRetriever:
         """Return a retriever interface for this store.
 
         Args:
             k: Number of documents to retrieve (default: config.retriever_k).
+            channel_ids: Optional list of channel slugs to filter results.
 
         Returns:
             A LangChain VectorStoreRetriever.
         """
         search_k = k or self._config.retriever_k
+        search_kwargs: dict = {"k": search_k}
+
+        if channel_ids:
+            if len(channel_ids) == 1:
+                search_kwargs["filter"] = {"channel_id": channel_ids[0]}
+            else:
+                search_kwargs["filter"] = {"channel_id": {"$in": channel_ids}}
+
         return self._store.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": search_k},
+            search_kwargs=search_kwargs,
         )
 
-    def similarity_search(self, query: str, k: int | None = None) -> list[Document]:
+    def similarity_search(
+        self,
+        query: str,
+        k: int | None = None,
+        channel_ids: list[str] | None = None,
+    ) -> list[Document]:
         """Perform a similarity search.
 
         Args:
             query: Search query string.
             k: Number of results (default: config.retriever_k).
+            channel_ids: Optional list of channel slugs to filter results.
 
         Returns:
             List of matching Documents.
         """
         search_k = k or self._config.retriever_k
-        return self._store.similarity_search(query, k=search_k)
+        filter_dict = None
+
+        if channel_ids:
+            if len(channel_ids) == 1:
+                filter_dict = {"channel_id": channel_ids[0]}
+            else:
+                filter_dict = {"channel_id": {"$in": channel_ids}}
+
+        return self._store.similarity_search(query, k=search_k, filter=filter_dict)
+
+    def delete_by_channel(self, channel_id: str) -> int:
+        """Delete all documents for a specific channel.
+
+        Args:
+            channel_id: Channel slug to delete documents for.
+
+        Returns:
+            Number of documents deleted.
+        """
+        try:
+            collection = self._store._collection
+            results = collection.get(where={"channel_id": channel_id})
+            ids = results.get("ids", [])
+            if ids:
+                collection.delete(ids=ids)
+                logger.info("Deleted %d documents for channel '%s'", len(ids), channel_id)
+            return len(ids)
+        except Exception as exc:
+            logger.warning("Error deleting documents for channel '%s': %s", channel_id, exc)
+            return 0
+
+    def get_channel_document_count(self, channel_id: str) -> int:
+        """Count documents for a specific channel.
+
+        Args:
+            channel_id: Channel slug to count documents for.
+
+        Returns:
+            Number of documents for the channel.
+        """
+        try:
+            collection = self._store._collection
+            results = collection.get(where={"channel_id": channel_id})
+            return len(results.get("ids", []))
+        except Exception:
+            return 0
 
     @property
     def document_count(self) -> int:

@@ -20,6 +20,8 @@ env/
 data/transcripts/
 data/metadata/
 data/chroma_db/
+data/channels/
+data/channels.json
 
 # IDE
 .vscode/

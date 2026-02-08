@@ -110,7 +110,7 @@ class TestProcessor:
         """Should create transcript chunks from a video with transcript."""
         meta = self._make_meta()
         transcript = self._make_transcript(5)
-        docs = process_video(meta, transcript)
+        docs = process_video(meta, transcript, channel_id="testchannel", channel_name="Test Channel")
 
         assert len(docs) > 0
         transcript_docs = [d for d in docs if d.metadata["chunk_type"] == "transcript"]
@@ -121,14 +121,17 @@ class TestProcessor:
             assert doc.metadata["video_id"] == "test_vid"
             assert doc.metadata["video_title"] == "Test Video Title"
             assert doc.metadata["video_url"] == "https://youtube.com/watch?v=test_vid"
+            assert doc.metadata["channel_id"] == "testchannel"
+            assert doc.metadata["channel_name"] == "Test Channel"
 
     def test_process_with_description(self):
         """Should create a description document when description is long enough."""
         meta = self._make_meta(description="A" * 100)
-        docs = process_video(meta, None)
+        docs = process_video(meta, None, channel_id="ch1", channel_name="Ch1")
 
         desc_docs = [d for d in docs if d.metadata["chunk_type"] == "description"]
         assert len(desc_docs) == 1
+        assert desc_docs[0].metadata["channel_id"] == "ch1"
 
     def test_process_short_description_skipped(self):
         """Should skip descriptions shorter than 50 chars."""
@@ -141,11 +144,12 @@ class TestProcessor:
         """Should create code documents from description code blocks."""
         desc = "Check this:\n```python\nimport numpy as np\ndata = np.array([1,2,3])\n```"
         meta = self._make_meta(description=desc)
-        docs = process_video(meta, None)
+        docs = process_video(meta, None, channel_id="ch1", channel_name="Ch1")
 
         code_docs = [d for d in docs if d.metadata["chunk_type"] == "code"]
         assert len(code_docs) > 0
         assert code_docs[0].metadata["code_language"] == "python"
+        assert code_docs[0].metadata["channel_id"] == "ch1"
 
     def test_process_no_transcript(self):
         """Should handle missing transcript gracefully."""
@@ -154,3 +158,12 @@ class TestProcessor:
 
         transcript_docs = [d for d in docs if d.metadata["chunk_type"] == "transcript"]
         assert len(transcript_docs) == 0
+
+    def test_process_default_channel_id(self):
+        """Should default to empty channel_id when not specified."""
+        meta = self._make_meta(description="A" * 100)
+        docs = process_video(meta, None)
+
+        for doc in docs:
+            assert doc.metadata["channel_id"] == ""
+            assert doc.metadata["channel_name"] == ""
