@@ -1,6 +1,17 @@
 """Tests for the ingestion pipeline."""
 
-from codetrading_rag.ingest.channel import VideoMetadata
+import json
+import tempfile
+import unittest.mock
+from pathlib import Path
+
+import pytest
+
+from codetrading_rag.ingest.channel import (
+    VideoMetadata,
+    fetch_single_video,
+    parse_video_id,
+)
 from codetrading_rag.ingest.processor import process_video
 from codetrading_rag.ingest.transcripts import (
     CodeBlock,
@@ -80,6 +91,124 @@ class TestVideoMetadata:
         restored = VideoMetadata.from_dict(meta.to_dict())
         assert restored.video_id == meta.video_id
         assert restored.title == meta.title
+
+    def test_unlisted_default_false(self):
+        """VideoMetadata should default unlisted to False."""
+        meta = VideoMetadata(
+            video_id="v1", title="T", description="D",
+            upload_date="20240101", duration=60,
+            url="https://youtube.com/watch?v=v1",
+        )
+        assert meta.unlisted is False
+
+    def test_unlisted_roundtrip(self):
+        """VideoMetadata should preserve unlisted=True through serialization."""
+        meta = VideoMetadata(
+            video_id="v1", title="T", description="D",
+            upload_date="20240101", duration=60,
+            url="https://youtube.com/watch?v=v1",
+            unlisted=True,
+        )
+        restored = VideoMetadata.from_dict(meta.to_dict())
+        assert restored.unlisted is True
+
+    def test_from_dict_without_unlisted(self):
+        """Existing dicts without 'unlisted' key should default to False."""
+        data = {
+            "video_id": "v1", "title": "T", "description": "D",
+            "upload_date": "20240101", "duration": 60,
+            "url": "https://youtube.com/watch?v=v1",
+        }
+        meta = VideoMetadata.from_dict(data)
+        assert meta.unlisted is False
+
+
+class TestParseVideoId:
+    """Tests for parse_video_id."""
+
+    def test_raw_video_id(self):
+        assert parse_video_id("dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    def test_raw_id_with_whitespace(self):
+        assert parse_video_id("  dQw4w9WgXcQ  ") == "dQw4w9WgXcQ"
+
+    def test_standard_url(self):
+        assert parse_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    def test_short_url(self):
+        assert parse_video_id("https://youtu.be/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    def test_embed_url(self):
+        assert parse_video_id("https://www.youtube.com/embed/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    def test_live_url(self):
+        assert parse_video_id("https://www.youtube.com/live/sBNX8A82vzw") == "sBNX8A82vzw"
+
+    def test_shorts_url(self):
+        assert parse_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    def test_url_with_extra_params(self):
+        assert parse_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx") == "dQw4w9WgXcQ"
+
+    def test_invalid_input(self):
+        with pytest.raises(ValueError, match="Could not extract video ID"):
+            parse_video_id("not-a-valid-url-or-id")
+
+
+class TestFetchSingleVideo:
+    """Tests for fetch_single_video."""
+
+    @unittest.mock.patch("codetrading_rag.ingest.channel.yt_dlp.YoutubeDL")
+    def test_fetch_new_video(self, mock_ydl_cls):
+        """Should fetch metadata via yt-dlp and save with unlisted=True."""
+        mock_ydl = mock_ydl_cls.return_value.__enter__.return_value
+        mock_ydl.extract_info.return_value = {
+            "id": "test12345ab",
+            "title": "Test Video",
+            "description": "A test description",
+            "upload_date": "20240101",
+            "duration": 300,
+            "webpage_url": "https://www.youtube.com/watch?v=test12345ab",
+        }
+
+        tmpdir = Path(tempfile.mkdtemp())
+        (tmpdir / "metadata").mkdir(parents=True)
+
+        meta = fetch_single_video("test12345ab", tmpdir, unlisted=True)
+
+        assert meta.video_id == "test12345ab"
+        assert meta.title == "Test Video"
+        assert meta.unlisted is True
+
+        saved_path = tmpdir / "metadata" / "test12345ab.json"
+        assert saved_path.exists()
+        saved_data = json.loads(saved_path.read_text())
+        assert saved_data["unlisted"] is True
+
+    def test_fetch_existing_video(self):
+        """Should return existing metadata and update unlisted flag."""
+        tmpdir = Path(tempfile.mkdtemp())
+        meta_dir = tmpdir / "metadata"
+        meta_dir.mkdir(parents=True)
+
+        existing = VideoMetadata(
+            video_id="existing1ab",
+            title="Existing Video",
+            description="",
+            upload_date="20240101",
+            duration=100,
+            url="https://youtube.com/watch?v=existing1ab",
+            unlisted=False,
+        )
+        (meta_dir / "existing1ab.json").write_text(json.dumps(existing.to_dict(), indent=2))
+
+        result = fetch_single_video("existing1ab", tmpdir, unlisted=True)
+        assert result.video_id == "existing1ab"
+        assert result.unlisted is True
+
+        # Verify file was updated on disk
+        saved_data = json.loads((meta_dir / "existing1ab.json").read_text())
+        assert saved_data["unlisted"] is True
 
 
 class TestProcessor:

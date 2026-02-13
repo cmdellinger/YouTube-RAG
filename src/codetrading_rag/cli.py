@@ -128,6 +128,95 @@ def channel_list(ctx: click.Context) -> None:
     console.print()
 
 
+# ─── channel video management ────────────────────────────────────────────────
+
+
+@channel.group("video")
+@click.pass_context
+def channel_video(ctx: click.Context) -> None:
+    """Manage individual videos for a channel."""
+    pass
+
+
+@channel_video.command("add")
+@click.argument("slug")
+@click.argument("url_or_id")
+@click.pass_context
+def channel_video_add(ctx: click.Context, slug: str, url_or_id: str) -> None:
+    """Add an unlisted video to a channel.
+
+    SLUG is the channel slug. URL_OR_ID is a YouTube video URL or video ID.
+    """
+    from codetrading_rag.channels.manager import ChannelManager
+    from codetrading_rag.ingest.channel import fetch_single_video
+
+    config: Config = ctx.obj["config"]
+    manager = ChannelManager(config.data_dir)
+    ch = manager.get(slug)
+    if not ch:
+        console.print(f"\n[red]Error:[/] Channel '{slug}' not found.\n")
+        sys.exit(1)
+
+    data_dir = manager.get_data_dir(slug)
+    try:
+        meta = fetch_single_video(url_or_id, data_dir, unlisted=True)
+        manager.refresh_counts(slug)
+        console.print(f"\n[green]Added unlisted video:[/] {meta.title}")
+        console.print(f"  ID: {meta.video_id}")
+        console.print(f"  URL: {meta.url}")
+        console.print(f"  Duration: {meta.duration}s\n")
+        console.print("[dim]Run 'ingest' to fetch transcript and index this video.[/]\n")
+    except ValueError as exc:
+        console.print(f"\n[red]Error:[/] {exc}\n")
+        sys.exit(1)
+
+
+@channel_video.command("list")
+@click.argument("slug")
+@click.option("--unlisted-only", is_flag=True, help="Show only unlisted videos.")
+@click.pass_context
+def channel_video_list(ctx: click.Context, slug: str, unlisted_only: bool) -> None:
+    """List videos for a channel."""
+    from codetrading_rag.channels.manager import ChannelManager
+    from codetrading_rag.ingest.channel import load_all_metadata
+
+    config: Config = ctx.obj["config"]
+    manager = ChannelManager(config.data_dir)
+    ch = manager.get(slug)
+    if not ch:
+        console.print(f"\n[red]Error:[/] Channel '{slug}' not found.\n")
+        sys.exit(1)
+
+    data_dir = manager.get_data_dir(slug)
+    videos = load_all_metadata(data_dir)
+
+    if unlisted_only:
+        videos = [v for v in videos if v.unlisted]
+
+    if not videos:
+        label = "unlisted " if unlisted_only else ""
+        console.print(f"\n[yellow]No {label}videos found for {slug}.[/]\n")
+        return
+
+    table = Table(title=f"Videos for {ch.name}", show_header=True)
+    table.add_column("Title", style="cyan", max_width=50)
+    table.add_column("ID", style="green")
+    table.add_column("Date")
+    table.add_column("Unlisted", justify="center")
+
+    for v in videos:
+        table.add_row(
+            v.title[:50],
+            v.video_id,
+            v.upload_date,
+            "Yes" if v.unlisted else "",
+        )
+
+    console.print()
+    console.print(table)
+    console.print(f"\n  Total: {len(videos)} videos\n")
+
+
 # ─── ingest ──────────────────────────────────────────────────────────────────
 
 

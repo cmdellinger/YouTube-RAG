@@ -64,42 +64,65 @@ def create_app(config: Config) -> gr.Blocks:
             return choice.rsplit("(", 1)[1].rstrip(")")
         return choice
 
+    def _get_unlisted_df(channel_choice: str) -> list[list[str]]:
+        """Return unlisted video data as rows for the dataframe."""
+        if not channel_choice:
+            return []
+        slug = _slug_from_choice(channel_choice)
+        mgr = ChannelManager(config.data_dir)
+        ch = mgr.get(slug)
+        if not ch:
+            return []
+        from codetrading_rag.ingest.channel import load_all_metadata
+
+        data_dir = mgr.get_data_dir(slug)
+        videos = load_all_metadata(data_dir)
+        rows = []
+        for v in videos:
+            if v.unlisted:
+                date = v.upload_date
+                if len(date) == 8:
+                    date = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+                mins, secs = divmod(v.duration, 60)
+                rows.append([
+                    v.title,
+                    v.video_id,
+                    date,
+                    f"{mins}:{secs:02d}",
+                    v.url,
+                ])
+        return rows
+
     # ─── Callbacks ───────────────────────────────────────────────────────
+
+    def _channel_outputs(msg: str = "") -> tuple:
+        """Build the standard output tuple for channel management callbacks."""
+        choices = _get_channel_choices()
+        return (
+            _get_channels_df(),
+            gr.update(choices=choices),
+            gr.update(choices=choices),
+            gr.update(choices=_get_channel_slugs()),
+            gr.update(choices=choices),
+            msg,
+        )
 
     def add_channel_cb(name: str, url: str):
         """Add a new channel."""
         if not name or not url:
-            return (
-                _get_channels_df(),
-                gr.update(choices=_get_channel_choices()),
-                gr.update(choices=_get_channel_choices()),
-                gr.update(choices=_get_channel_slugs()),
-                "Please enter both a channel name and URL.",
-            )
+            return _channel_outputs("Please enter both a channel name and URL.")
         mgr = ChannelManager(config.data_dir)
         try:
             info = mgr.add_channel(name, url)
             msg = f"Added channel: {info.name} (slug: {info.slug})"
         except ValueError as exc:
             msg = f"Error: {exc}"
-        return (
-            _get_channels_df(),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_slugs()),
-            msg,
-        )
+        return _channel_outputs(msg)
 
     def remove_channel_cb(selection: str):
         """Remove a channel."""
         if not selection:
-            return (
-                _get_channels_df(),
-                gr.update(choices=_get_channel_choices()),
-                gr.update(choices=_get_channel_choices()),
-                gr.update(choices=_get_channel_slugs()),
-                "Please select a channel to remove.",
-            )
+            return _channel_outputs("Please select a channel to remove.")
         slug = _slug_from_choice(selection)
         mgr = ChannelManager(config.data_dir)
         try:
@@ -107,22 +130,61 @@ def create_app(config: Config) -> gr.Blocks:
             msg = f"Removed channel: {slug}"
         except ValueError as exc:
             msg = f"Error: {exc}"
-        return (
-            _get_channels_df(),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_slugs()),
-            msg,
-        )
+        return _channel_outputs(msg)
 
     def refresh_cb():
         """Refresh channel data."""
-        return (
-            _get_channels_df(),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_choices()),
-            gr.update(choices=_get_channel_slugs()),
+        return _channel_outputs("")
+
+    def add_unlisted_cb(channel_choice: str, url_or_id: str):
+        """Add an unlisted video to a channel."""
+        if not channel_choice or not url_or_id:
+            return (
+                *_channel_outputs("Please select a channel and enter a video URL or ID."),
+                _get_unlisted_df(channel_choice),
+            )
+
+        slug = _slug_from_choice(channel_choice)
+        mgr = ChannelManager(config.data_dir)
+        ch = mgr.get(slug)
+        if not ch:
+            return (
+                *_channel_outputs(f"Channel '{slug}' not found."),
+                _get_unlisted_df(channel_choice),
+            )
+
+        from codetrading_rag.ingest.channel import (
+            fetch_single_video,
+            load_all_metadata,
+            parse_video_id,
         )
+
+        try:
+            # Check if already exists before fetching to give a clear message
+            video_id = parse_video_id(url_or_id)
+            existing_ids = {v.video_id for v in load_all_metadata(mgr.get_data_dir(slug))}
+            was_existing = video_id in existing_ids
+
+            meta = fetch_single_video(url_or_id, mgr.get_data_dir(slug), unlisted=True)
+            mgr.refresh_counts(slug)
+
+            if was_existing:
+                msg = f"Video already exists: {meta.title} ({meta.video_id}). Marked as unlisted."
+            else:
+                msg = f"Added unlisted video: {meta.title} ({meta.video_id}). Run ingestion to index it."
+        except ValueError as exc:
+            msg = f"Error: {exc}"
+        except Exception as exc:
+            msg = f"Error fetching video: {exc}"
+
+        return (
+            *_channel_outputs(msg),
+            _get_unlisted_df(channel_choice),
+        )
+
+    def unlisted_channel_changed_cb(channel_choice: str):
+        """Update unlisted videos table when channel selection changes."""
+        return _get_unlisted_df(channel_choice)
 
     def ingest_cb(selected_channels: list[str], limit: int | None, reindex: bool):
         """Run ingestion for selected channels. Yields progress updates."""
@@ -320,6 +382,29 @@ def create_app(config: Config) -> gr.Blocks:
                     )
                     remove_btn = gr.Button("Remove Channel", variant="stop")
 
+            gr.Markdown("### Add Unlisted Video")
+            with gr.Row():
+                unlisted_channel_dropdown = gr.Dropdown(
+                    choices=_get_channel_choices(),
+                    label="Channel",
+                    interactive=True,
+                    scale=1,
+                )
+                unlisted_url_input = gr.Textbox(
+                    label="Video URL or ID",
+                    placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ or dQw4w9WgXcQ",
+                    scale=2,
+                )
+                add_unlisted_btn = gr.Button("Add Unlisted Video", variant="primary", scale=1)
+
+            with gr.Accordion("Unlisted Videos", open=False):
+                unlisted_table = gr.Dataframe(
+                    headers=["Title", "Video ID", "Date", "Duration", "URL"],
+                    value=[],
+                    interactive=False,
+                    label="Select a channel above to view unlisted videos",
+                )
+
             channel_msg = gr.Textbox(label="Status", interactive=False)
             refresh_btn = gr.Button("Refresh")
 
@@ -390,20 +475,33 @@ def create_app(config: Config) -> gr.Blocks:
         # ─── Wire up events ──────────────────────────────────────────────
 
         # Channel management events
-        add_outputs = [channels_table, remove_dropdown, ingest_channels, query_channels, channel_msg]
+        channel_outputs = [
+            channels_table, remove_dropdown, ingest_channels,
+            query_channels, unlisted_channel_dropdown, channel_msg,
+        ]
         add_btn.click(
             add_channel_cb,
             inputs=[ch_name_input, ch_url_input],
-            outputs=add_outputs,
+            outputs=channel_outputs,
         )
         remove_btn.click(
             remove_channel_cb,
             inputs=[remove_dropdown],
-            outputs=add_outputs,
+            outputs=channel_outputs,
         )
         refresh_btn.click(
             refresh_cb,
-            outputs=[channels_table, remove_dropdown, ingest_channels, query_channels],
+            outputs=channel_outputs,
+        )
+        add_unlisted_btn.click(
+            add_unlisted_cb,
+            inputs=[unlisted_channel_dropdown, unlisted_url_input],
+            outputs=[*channel_outputs, unlisted_table],
+        )
+        unlisted_channel_dropdown.change(
+            unlisted_channel_changed_cb,
+            inputs=[unlisted_channel_dropdown],
+            outputs=[unlisted_table],
         )
 
         # Ingestion events

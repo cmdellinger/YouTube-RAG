@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ class VideoMetadata:
     upload_date: str  # YYYYMMDD
     duration: int  # seconds
     url: str
+    unlisted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -174,3 +176,106 @@ def load_all_metadata(data_dir: Path | str = "data") -> list[VideoMetadata]:
             logger.warning("Error loading %s: %s", path, exc)
 
     return results
+
+
+def parse_video_id(url_or_id: str) -> str:
+    """Extract a YouTube video ID from a URL or return it if already an ID.
+
+    Supports formats:
+        - https://www.youtube.com/watch?v=VIDEO_ID
+        - https://youtu.be/VIDEO_ID
+        - https://www.youtube.com/embed/VIDEO_ID
+        - https://www.youtube.com/live/VIDEO_ID
+        - https://www.youtube.com/shorts/VIDEO_ID
+        - VIDEO_ID (11-char alphanumeric string)
+
+    Raises:
+        ValueError: If the input cannot be parsed as a valid video ID.
+    """
+    url_or_id = url_or_id.strip()
+
+    # Direct video ID (11 chars, alphanumeric + dash/underscore)
+    if re.match(r"^[A-Za-z0-9_-]{11}$", url_or_id):
+        return url_or_id
+
+    # YouTube URL patterns
+    patterns = [
+        r"(?:youtube\.com/watch\?.*v=)([A-Za-z0-9_-]{11})",
+        r"(?:youtu\.be/)([A-Za-z0-9_-]{11})",
+        r"(?:youtube\.com/embed/)([A-Za-z0-9_-]{11})",
+        r"(?:youtube\.com/live/)([A-Za-z0-9_-]{11})",
+        r"(?:youtube\.com/shorts/)([A-Za-z0-9_-]{11})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url_or_id)
+        if match:
+            return match.group(1)
+
+    raise ValueError(f"Could not extract video ID from: {url_or_id}")
+
+
+def fetch_single_video(
+    url_or_id: str,
+    data_dir: Path | str,
+    unlisted: bool = True,
+) -> VideoMetadata:
+    """Fetch metadata for a single YouTube video and save it.
+
+    Designed for adding unlisted or private videos that don't appear
+    in a channel's public video listing.
+
+    Args:
+        url_or_id: YouTube video URL or 11-character video ID.
+        data_dir: Channel data directory (e.g., data/channels/{slug}/).
+        unlisted: Whether to mark this video as unlisted.
+
+    Returns:
+        The fetched VideoMetadata.
+
+    Raises:
+        ValueError: If the URL/ID cannot be parsed or video cannot be fetched.
+    """
+    data_dir = Path(data_dir)
+    video_id = parse_video_id(url_or_id)
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Check if already exists
+    existing_ids = _load_existing_ids(data_dir)
+    if video_id in existing_ids:
+        meta_path = _get_metadata_path(data_dir, video_id)
+        data = json.loads(meta_path.read_text())
+        existing = VideoMetadata.from_dict(data)
+        if unlisted and not existing.unlisted:
+            existing.unlisted = True
+            meta_path.write_text(json.dumps(existing.to_dict(), indent=2))
+        return existing
+
+    logger.info("Fetching metadata for single video: %s", video_id)
+
+    detail_opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+    }
+
+    with yt_dlp.YoutubeDL(detail_opts) as ydl:
+        info = ydl.extract_info(video_url, download=False)
+
+    if not info:
+        raise ValueError(f"Could not extract info for video: {video_id}")
+
+    meta = VideoMetadata(
+        video_id=info.get("id", video_id),
+        title=info.get("title", ""),
+        description=info.get("description", ""),
+        upload_date=info.get("upload_date", ""),
+        duration=info.get("duration", 0) or 0,
+        url=info.get("webpage_url", video_url),
+        unlisted=unlisted,
+    )
+
+    meta_path = _get_metadata_path(data_dir, meta.video_id)
+    meta_path.write_text(json.dumps(meta.to_dict(), indent=2))
+    logger.info("Saved unlisted video: %s (%s)", meta.title, meta.video_id)
+
+    return meta
