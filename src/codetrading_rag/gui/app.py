@@ -100,10 +100,10 @@ def create_app(config: Config) -> gr.Blocks:
         choices = _get_channel_choices()
         return (
             _get_channels_df(),
-            gr.update(choices=choices),
-            gr.update(choices=choices),
-            gr.update(choices=_get_channel_slugs()),
-            gr.update(choices=choices),
+            gr.Dropdown(choices=choices),
+            gr.CheckboxGroup(choices=choices),
+            gr.CheckboxGroup(choices=_get_channel_slugs()),
+            gr.Dropdown(choices=choices),
             msg,
         )
 
@@ -358,7 +358,7 @@ def create_app(config: Config) -> gr.Blocks:
 
         # ─── Tab 1: Channel Management ───────────────────────────────────
 
-        with gr.Tab("Channels"):
+        with gr.Tab("Channels") as tab_channels:
             channels_table = gr.Dataframe(
                 headers=["Name", "Slug", "URL", "Status", "Videos", "Transcripts", "Last Ingested"],
                 value=_get_channels_df(),
@@ -410,7 +410,7 @@ def create_app(config: Config) -> gr.Blocks:
 
         # ─── Tab 2: Ingestion ────────────────────────────────────────────
 
-        with gr.Tab("Ingest"):
+        with gr.Tab("Ingest") as tab_ingest:
             ingest_channels = gr.CheckboxGroup(
                 choices=_get_channel_choices(),
                 label="Select Channels to Ingest",
@@ -441,7 +441,7 @@ def create_app(config: Config) -> gr.Blocks:
 
         # ─── Tab 3: Query ────────────────────────────────────────────────
 
-        with gr.Tab("Query"):
+        with gr.Tab("Query") as tab_query:
             with gr.Row():
                 query_channels = gr.CheckboxGroup(
                     choices=_get_channel_slugs(),
@@ -518,10 +518,21 @@ def create_app(config: Config) -> gr.Blocks:
             outputs=[query_output, query_sources],
         )
 
-        # Refresh channel data on page load so new channels appear after reload
-        app.load(
+        # Refresh channel data when switching tabs so new channels appear
+        tab_channels.select(
             refresh_cb,
             outputs=channel_outputs,
+        )
+        tab_ingest.select(
+            lambda: (
+                gr.CheckboxGroup(choices=_get_channel_choices()),
+                _get_channels_df(),
+            ),
+            outputs=[ingest_channels, ingest_status_table],
+        )
+        tab_query.select(
+            lambda: gr.CheckboxGroup(choices=_get_channel_slugs()),
+            outputs=[query_channels],
         )
 
     return app
