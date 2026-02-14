@@ -27,6 +27,7 @@ def create_app(config: Config) -> gr.Blocks:
     from codetrading_rag.channels.manager import ChannelManager
 
     manager = ChannelManager(config.data_dir)
+    manager.recover_stale_ingesting()
 
     # ─── Helper functions ────────────────────────────────────────────────
 

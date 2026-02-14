@@ -59,16 +59,25 @@ class VectorStore:
         )
         logger.info("Created vector store with %d documents", len(documents))
 
-    def add_documents(self, documents: list[Document]) -> None:
-        """Add documents to the existing store.
+    def add_documents(self, documents: list[Document], batch_size: int = 5000) -> None:
+        """Add documents to the existing store in batches.
 
         Args:
             documents: List of LangChain Documents to embed and add.
+            batch_size: Max documents per batch (ChromaDB limit is 5461).
         """
         if not documents:
             return
-        self._store.add_documents(documents)
-        logger.info("Added %d documents to vector store", len(documents))
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i : i + batch_size]
+            self._store.add_documents(batch)
+            logger.info(
+                "Added batch %d/%d (%d documents)",
+                i // batch_size + 1,
+                (len(documents) - 1) // batch_size + 1,
+                len(batch),
+            )
+        logger.info("Added %d documents total to vector store", len(documents))
 
     def as_retriever(
         self,

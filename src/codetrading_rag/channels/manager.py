@@ -61,22 +61,33 @@ class ChannelManager:
         """Load channel registry from disk."""
         if self._registry_path.exists():
             data = json.loads(self._registry_path.read_text())
-            dirty = False
             for ch in data.get("channels", []):
                 info = ChannelInfo.from_dict(ch)
-                if info.status == "ingesting":
-                    logger.warning(
-                        "Channel '%s' was left in 'ingesting' state; resetting to 'error'",
-                        info.slug,
-                    )
-                    info.status = "error"
-                    dirty = True
                 self._channels[info.slug] = info
-            if dirty:
-                self._save()
             logger.info("Loaded %d channels from registry", len(self._channels))
         else:
             logger.info("No channel registry found, starting fresh")
+
+    def recover_stale_ingesting(self) -> list[str]:
+        """Reset channels stuck in 'ingesting' state to 'error'.
+
+        Call once at application startup, not on every ChannelManager instantiation.
+
+        Returns:
+            List of channel slugs that were reset.
+        """
+        reset = []
+        for ch in self._channels.values():
+            if ch.status == "ingesting":
+                logger.warning(
+                    "Channel '%s' was left in 'ingesting' state; resetting to 'error'",
+                    ch.slug,
+                )
+                ch.status = "error"
+                reset.append(ch.slug)
+        if reset:
+            self._save()
+        return reset
 
     def _save(self) -> None:
         """Persist channel registry to disk."""
