@@ -518,4 +518,10 @@ def create_app(config: Config) -> gr.Blocks:
             outputs=[query_output, query_sources],
         )
 
+        # Refresh channel data on page load so new channels appear after reload
+        app.load(
+            refresh_cb,
+            outputs=channel_outputs,
+        )
+
     return app
